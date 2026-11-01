@@ -22,13 +22,21 @@ struct ClipCutApp: App {
                 Button("Nhập video…") { model.promptImport() }
                     .keyboardShortcut("o")
             }
+            CommandGroup(replacing: .undoRedo) {
+                Button("Hoàn tác") { model.undo() }
+                    .keyboardShortcut("z")
+                    .disabled(!model.canUndo)
+                Button("Làm lại") { model.redo() }
+                    .keyboardShortcut("z", modifiers: [.command, .shift])
+                    .disabled(!model.canRedo)
+            }
             CommandMenu("Chỉnh sửa video") {
                 Button("Cắt đôi tại playhead") { model.splitAtPlayhead() }
                     .keyboardShortcut("b")
                     .disabled(model.clips.isEmpty)
                 Button("Xóa clip đang chọn") { model.removeSelected() }
                     .keyboardShortcut(.delete, modifiers: [])
-                    .disabled(model.selection == nil)
+                    .disabled(!model.hasTarget)
                 Divider()
                 Button("Xuất video…") { model.promptExport() }
                     .keyboardShortcut("e")

@@ -27,6 +27,7 @@ struct ClipTimeline: View {
                 .padding(.top, 22)
 
                 ruler
+                markers
                 playhead
             }
             .padding(.horizontal, 12)
@@ -55,6 +56,19 @@ struct ClipTimeline: View {
         .gesture(DragGesture(minimumDistance: 0).onChanged { v in
             model.seek(to: v.location.x / pps)
         })
+    }
+
+    private var markers: some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(model.markers, id: \.self) { t in
+                Image(systemName: "bookmark.fill")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.cyan)
+                    .offset(x: t * model.pixelsPerSecond - 4, y: 9)
+                    .onTapGesture { model.seek(to: t) }
+                    .help("Marker \(t.timecode) — bấm để tua tới")
+            }
+        }
     }
 
     private var playhead: some View {
@@ -88,6 +102,7 @@ private struct ClipCard: View {
                 .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 3))
                 .foregroundStyle(.white)
                 .padding(4)
+            badges
             Text(clip.duration.timecode)
                 .font(.system(size: 9, design: .monospaced))
                 .foregroundStyle(.white)
@@ -102,8 +117,8 @@ private struct ClipCard: View {
                               lineWidth: isSelected ? 2 : 1)
         )
         .overlay(alignment: .leading) { if dropTargeted { Rectangle().fill(Color.accentColor).frame(width: 3) } }
-        .overlay(alignment: .leading) { trimHandle(leading: true) }
-        .overlay(alignment: .trailing) { trimHandle(leading: false) }
+        .overlay(alignment: .leading) { if !clip.isFreeze { trimHandle(leading: true) } }
+        .overlay(alignment: .trailing) { if !clip.isFreeze { trimHandle(leading: false) } }
         .padding(.horizontal, 1)
         .contentShape(Rectangle())
         .onTapGesture(coordinateSpace: .local) { loc in
@@ -118,6 +133,21 @@ private struct ClipCard: View {
             model.move(clipID: id, before: clip.id)
             return true
         } isTargeted: { dropTargeted = $0 }
+    }
+
+    /// Biểu tượng nhỏ cho thuộc tính đã chỉnh: tốc độ, đóng băng, âm lượng, xoay/lật.
+    private var badges: some View {
+        HStack(spacing: 3) {
+            if clip.isFreeze { Image(systemName: "snowflake") }
+            if clip.speed != 1 && !clip.isFreeze { Text("\(clip.speed.formatted())x") }
+            if clip.volume == 0 && !clip.isFreeze { Image(systemName: "speaker.slash.fill") }
+            if clip.quarterTurns != 0 { Image(systemName: "rotate.right") }
+            if clip.flipH || clip.flipV { Image(systemName: "arrow.left.and.right.righttriangle.left.righttriangle.right") }
+        }
+        .font(.system(size: 9, weight: .semibold))
+        .foregroundStyle(.white)
+        .padding(4)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
     }
 
     private var thumbnailStrip: some View {
@@ -148,9 +178,14 @@ private struct ClipCard: View {
             .gesture(
                 DragGesture(minimumDistance: 1)
                     .onChanged { v in
-                        if dragBase == nil { dragBase = (clip.start, clip.end); model.selection = clip.id }
+                        if dragBase == nil {
+                            dragBase = (clip.start, clip.end)
+                            model.selection = clip.id
+                            model.checkpoint()
+                        }
                         guard let base = dragBase else { return }
-                        let delta = Double(v.translation.width) / model.pixelsPerSecond
+                        // kéo theo thời gian timeline -> đổi sang thời gian file gốc
+                        let delta = Double(v.translation.width) / model.pixelsPerSecond * clip.speed
                         if leading {
                             model.setTrim(id: clip.id, start: base.start + delta)
                         } else {

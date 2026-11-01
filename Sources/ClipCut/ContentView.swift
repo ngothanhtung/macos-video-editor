@@ -9,8 +9,9 @@ struct ContentView: View {
         HSplitView {
             VStack(spacing: 0) {
                 preview
+                PlaybackBar()
                 Divider()
-                transportBar
+                EditToolbar()
                 Divider()
                 ClipTimeline()
                     .frame(minHeight: 150, idealHeight: 170, maxHeight: 220)
@@ -39,7 +40,7 @@ struct ContentView: View {
                 }
                 .foregroundStyle(.secondary)
             } else {
-                VideoPlayer(player: model.player)
+                PlayerView(player: model.player)
             }
             if dropTargeted {
                 RoundedRectangle(cornerRadius: 8)
@@ -48,37 +49,6 @@ struct ContentView: View {
             }
         }
         .frame(minHeight: 300)
-    }
-
-    private var transportBar: some View {
-        HStack(spacing: 12) {
-            Button { model.seek(to: 0) } label: { Image(systemName: "backward.end.fill") }
-            Button { model.togglePlay() } label: { Image(systemName: "playpause.fill") }
-                .keyboardShortcut(.space, modifiers: [])
-            Button { model.splitAtPlayhead() } label: { Label("Cắt", systemImage: "scissors") }
-                .help("Cắt đôi clip tại playhead (⌘B)")
-            Button { model.markIn() } label: { Text("I") }
-                .keyboardShortcut("i", modifiers: [])
-                .help("Đặt điểm đầu clip đang chọn tại playhead")
-            Button { model.markOut() } label: { Text("O") }
-                .keyboardShortcut("o", modifiers: [])
-                .help("Đặt điểm cuối clip đang chọn tại playhead")
-
-            Spacer()
-
-            Text("\(model.currentTime.timecode) / \(model.totalDuration.timecode)")
-                .font(.system(.body, design: .monospaced))
-
-            Spacer()
-
-            Image(systemName: "minus.magnifyingglass").foregroundStyle(.secondary)
-            Slider(value: $model.pixelsPerSecond, in: 5...200).frame(width: 120)
-            Image(systemName: "plus.magnifyingglass").foregroundStyle(.secondary)
-        }
-        .buttonStyle(.borderless)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .disabled(model.clips.isEmpty)
     }
 
     private var statusBar: some View {
@@ -108,5 +78,22 @@ struct ContentView: View {
             Button { model.promptExport() } label: { Label("Xuất", systemImage: "square.and.arrow.up") }
                 .disabled(model.clips.isEmpty || model.isExporting)
         }
+    }
+}
+
+/// Bọc AVPlayerView trực tiếp thay cho SwiftUI `VideoPlayer`: khi build bằng SwiftPM,
+/// `VideoPlayer` crash lúc chạy vì AVKit không được link nên không tìm thấy class AVPlayerView.
+struct PlayerView: NSViewRepresentable {
+    let player: AVPlayer
+
+    func makeNSView(context: Context) -> AVPlayerView {
+        let view = AVPlayerView()
+        view.player = player
+        view.controlsStyle = .floating
+        return view
+    }
+
+    func updateNSView(_ view: AVPlayerView, context: Context) {
+        if view.player !== player { view.player = player }
     }
 }

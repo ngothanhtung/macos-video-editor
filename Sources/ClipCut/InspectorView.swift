@@ -28,7 +28,13 @@ struct InspectorView: View {
                     shortcut("Space", "Phát / dừng")
                     shortcut("⌘B", "Cắt tại playhead")
                     shortcut("I / O", "Đặt điểm đầu / cuối")
-                    shortcut("⌫", "Xóa clip đang chọn")
+                    shortcut("Q / W", "Xóa trái / phải playhead")
+                    shortcut("⌫", "Xóa clip")
+                    shortcut("⌘D", "Nhân đôi clip")
+                    shortcut("F", "Đóng băng khung hình")
+                    shortcut("M", "Marker")
+                    shortcut("⌘R", "Xoay 90°")
+                    shortcut("⌘Z / ⇧⌘Z", "Hoàn tác / làm lại")
                     shortcut("⌘O", "Nhập video")
                     shortcut("⌘E", "Xuất video")
                 }
@@ -50,21 +56,30 @@ struct InspectorView: View {
             }
 
             row("File gốc", clip.assetDuration.timecode)
-            row("Đoạn dùng", clip.duration.timecode)
+            row("Đoạn dùng", clip.sourceDuration.timecode)
+            row("Trên timeline", clip.duration.timecode)
+            if clip.isFreeze {
+                Label("Khung hình đóng băng", systemImage: "snowflake").font(.callout)
+            } else {
+                row("Tốc độ", "\(clip.speed.formatted())x")
+            }
+            row("Âm lượng", "\(Int(clip.volume * 100))%")
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("Điểm đầu: \(clip.start.timecode)").font(.caption)
                 Slider(value: Binding(
                     get: { clip.start },
                     set: { model.setTrim(id: clip.id, start: $0) }
-                ), in: 0...clip.assetDuration)
+                ), in: 0...clip.assetDuration) { if $0 { model.checkpoint() } }
+                .disabled(clip.isFreeze)
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text("Điểm cuối: \(clip.end.timecode)").font(.caption)
                 Slider(value: Binding(
                     get: { clip.end },
                     set: { model.setTrim(id: clip.id, end: $0) }
-                ), in: 0...clip.assetDuration)
+                ), in: 0...clip.assetDuration) { if $0 { model.checkpoint() } }
+                .disabled(clip.isFreeze)
             }
 
             HStack {
@@ -74,7 +89,13 @@ struct InspectorView: View {
             .controlSize(.small)
 
             HStack {
-                Button("Khôi phục") { model.setTrim(id: clip.id, start: 0, end: clip.assetDuration) }
+                Button("Khôi phục") {
+                    model.updateTarget {
+                        if !$0.isFreeze { $0.start = 0; $0.end = $0.assetDuration; $0.speed = 1 }
+                        $0.quarterTurns = 0; $0.flipH = false; $0.flipV = false
+                        if !$0.isFreeze { $0.volume = 1 }
+                    }
+                }
                 Spacer()
                 Button(role: .destructive) { model.removeSelected() } label: {
                     Label("Xóa clip", systemImage: "trash")

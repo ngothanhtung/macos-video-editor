@@ -106,10 +106,59 @@ final class EditorModel: ObservableObject {
         }
     }
 
+    // MARK: - Lịch sử (undo / redo)
+
+    @Published private(set) var undoStack: [[Clip]] = []
+    @Published private(set) var redoStack: [[Clip]] = []
+    var canUndo: Bool { !undoStack.isEmpty }
+    var canRedo: Bool { !redoStack.isEmpty }
+
+    /// Lưu trạng thái hiện tại trước khi sửa. Thao tác kéo liên tục (trim, slider) chỉ gọi một lần lúc bắt đầu.
+    func checkpoint() {
+        undoStack.append(clips)
+        if undoStack.count > 100 { undoStack.removeFirst() }
+        redoStack.removeAll()
+    }
+
+    func undo() {
+        guard let prev = undoStack.popLast() else { return }
+        redoStack.append(clips)
+        clips = prev
+        if let id = selection, !clips.contains(where: { $0.id == id }) { selection = nil }
+        status = "Hoàn tác"
+    }
+
+    func redo() {
+        guard let next = redoStack.popLast() else { return }
+        undoStack.append(clips)
+        clips = next
+        if let id = selection, !clips.contains(where: { $0.id == id }) { selection = nil }
+        status = "Làm lại"
+    }
+
     // MARK: - Chỉnh sửa
 
+    /// Clip tại playhead: (index, vị trí bắt đầu trên timeline).
+    private func clipAtPlayhead() -> (index: Int, offset: Double)? {
+        var t = 0.0
+        for (i, c) in clips.enumerated() {
+            if currentTime >= t && currentTime < t + c.duration { return (i, t) }
+            t += c.duration
+        }
+        return nil
+    }
+
+    /// Clip mà các nút chỉnh sửa tác động tới: clip đang chọn, nếu không có thì clip dưới playhead.
+    private var targetIndex: Int? {
+        if let id = selection, let i = clips.firstIndex(where: { $0.id == id }) { return i }
+        return clipAtPlayhead()?.index
+    }
+
+    var hasTarget: Bool { targetIndex != nil }
+    var targetClip: Clip? { targetIndex.map { clips[$0] } }
+
     func setTrim(id: Clip.ID, start: Double? = nil, end: Double? = nil) {
-        guard let i = clips.firstIndex(where: { $0.id == id }) else { return }
+        guard let i = clips.firstIndex(where: { $0.id == id }), !clips[i].isFreeze else { return }
         var c = clips[i]
         let minLen = 0.1
         if let start { c.start = min(max(0, start), c.end - minLen) }
@@ -120,50 +169,157 @@ final class EditorModel: ObservableObject {
     /// Đặt điểm đầu/cuối của clip đang chọn tại playhead (phím I / O).
     func markIn() {
         guard let c = selectedClip else { return }
-        let local = c.start + (currentTime - offset(of: c.id))
-        setTrim(id: c.id, start: local)
+        checkpoint()
+        setTrim(id: c.id, start: c.sourceTime(atLocal: currentTime - offset(of: c.id)))
     }
 
     func markOut() {
         guard let c = selectedClip else { return }
-        let local = c.start + (currentTime - offset(of: c.id))
-        setTrim(id: c.id, end: local)
+        checkpoint()
+        setTrim(id: c.id, end: c.sourceTime(atLocal: currentTime - offset(of: c.id)))
     }
 
     func splitAtPlayhead() {
-        var t = 0.0
-        for (i, c) in clips.enumerated() {
-            if currentTime >= t && currentTime < t + c.duration {
-                let local = c.start + (currentTime - t)
-                guard local - c.start > 0.1, c.end - local > 0.1 else { return }
-                let a = Clip(url: c.url, assetDuration: c.assetDuration, start: c.start, end: local)
-                let b = Clip(url: c.url, assetDuration: c.assetDuration, start: local, end: c.end)
-                thumbnails[a.id] = thumbnails[c.id]
-                clips.replaceSubrange(i...i, with: [a, b])
-                loadThumbnail(for: b)
-                selection = b.id
-                status = "Đã cắt \(c.name) tại \(local.timecode)"
-                return
-            }
-            t += c.duration
-        }
+        guard let (i, t) = clipAtPlayhead() else { return }
+        let c = clips[i]
+        guard !c.isFreeze else { return }
+        let local = c.sourceTime(atLocal: currentTime - t)
+        guard local - c.start > 0.1, c.end - local > 0.1 else { return }
+        checkpoint()
+        let a = c.copy(end: local)
+        let b = c.copy(start: local)
+        thumbnails[a.id] = thumbnails[c.id]
+        clips.replaceSubrange(i...i, with: [a, b])
+        loadThumbnail(for: b)
+        selection = b.id
+        status = "Đã cắt \(c.name) tại \(local.timecode)"
+    }
+
+    /// Xóa phần clip nằm bên trái playhead (giữ phần bên phải).
+    func deleteLeftOfPlayhead() {
+        guard let (i, t) = clipAtPlayhead(), !clips[i].isFreeze else { return }
+        let c = clips[i]
+        checkpoint()
+        setTrim(id: c.id, start: c.sourceTime(atLocal: currentTime - t))
+        selection = c.id
+        seek(to: t)
+        status = "Đã xóa phần bên trái playhead"
+    }
+
+    /// Xóa phần clip nằm bên phải playhead (giữ phần bên trái).
+    func deleteRightOfPlayhead() {
+        guard let (i, t) = clipAtPlayhead(), !clips[i].isFreeze else { return }
+        let c = clips[i]
+        checkpoint()
+        setTrim(id: c.id, end: c.sourceTime(atLocal: currentTime - t))
+        selection = c.id
+        status = "Đã xóa phần bên phải playhead"
     }
 
     func removeSelected() {
-        guard let id = selection else { return }
-        clips.removeAll { $0.id == id }
-        thumbnails[id] = nil
+        guard let i = targetIndex else { return }
+        checkpoint()
+        clips.remove(at: i)
         selection = nil
+        seek(to: currentTime)
     }
+
+    /// Nhân đôi clip, đặt bản sao ngay sau bản gốc.
+    func duplicateTarget() {
+        guard let i = targetIndex else { return }
+        checkpoint()
+        let dup = clips[i].copy()
+        thumbnails[dup.id] = thumbnails[clips[i].id]
+        clips.insert(dup, at: i + 1)
+        selection = dup.id
+        status = "Đã nhân đôi \(dup.name)"
+    }
+
+    /// Chèn khung hình đóng băng 2 giây tại playhead (tách clip nếu playhead nằm giữa clip).
+    func freezeFrame(seconds: Double = 2) {
+        guard let (i, t) = clipAtPlayhead(), !clips[i].isFreeze else { return }
+        let c = clips[i]
+        let local = c.sourceTime(atLocal: currentTime - t)
+        let frameLen = 1.0 / 30
+        let frameStart = min(local, c.end - frameLen)
+
+        var freeze = Clip(url: c.url, assetDuration: c.assetDuration, start: frameStart, end: frameStart + frameLen)
+        freeze.speed = frameLen / seconds
+        freeze.volume = 0
+        freeze.quarterTurns = c.quarterTurns
+        freeze.flipH = c.flipH
+        freeze.flipV = c.flipV
+        freeze.isFreeze = true
+
+        checkpoint()
+        var replacement: [Clip] = []
+        if local - c.start > 0.1 {
+            let a = c.copy(end: local)
+            thumbnails[a.id] = thumbnails[c.id]
+            replacement.append(a)
+        }
+        replacement.append(freeze)
+        if c.end - local > 0.1 {
+            let b = c.copy(start: local)
+            replacement.append(b)
+            loadThumbnail(for: b)
+        }
+        clips.replaceSubrange(i...i, with: replacement)
+        loadThumbnail(for: freeze)
+        selection = freeze.id
+        status = "Đã chèn khung hình đóng băng \(Int(seconds)) giây"
+    }
+
+    /// Sửa thuộc tính clip mục tiêu. `record: false` khi gọi liên tục từ slider (đã checkpoint lúc bắt đầu kéo).
+    func updateTarget(record: Bool = true, _ change: (inout Clip) -> Void) {
+        guard let i = targetIndex else { return }
+        if record { checkpoint() }
+        var c = clips[i]
+        change(&c)
+        clips[i] = c
+    }
+
+    func setSpeed(_ speed: Double) {
+        guard targetClip?.isFreeze == false else { return }
+        updateTarget { $0.speed = speed }
+        status = "Tốc độ \(speed.formatted())x"
+    }
+
+    func rotateTarget() { updateTarget { $0.quarterTurns = ($0.quarterTurns + 1) % 4 } }
+    func flipTargetHorizontal() { updateTarget { $0.flipH.toggle() } }
+    func flipTargetVertical() { updateTarget { $0.flipV.toggle() } }
 
     func move(clipID: Clip.ID, before targetID: Clip.ID?) {
         guard let from = clips.firstIndex(where: { $0.id == clipID }) else { return }
+        checkpoint()
         let clip = clips.remove(at: from)
         if let targetID, let to = clips.firstIndex(where: { $0.id == targetID }) {
             clips.insert(clip, at: to)
         } else {
             clips.append(clip)
         }
+    }
+
+    // MARK: - Marker
+
+    @Published var markers: [Double] = []
+
+    /// Thêm marker tại playhead, hoặc gỡ nếu đã có marker sát đó.
+    func toggleMarker() {
+        if let i = markers.firstIndex(where: { abs($0 - currentTime) < 0.05 }) {
+            markers.remove(at: i)
+        } else {
+            markers.append(currentTime)
+            markers.sort()
+        }
+    }
+
+    // MARK: - Zoom
+
+    /// Zoom để toàn bộ timeline vừa với độ rộng cho trước.
+    func zoomToFit(width: Double) {
+        guard totalDuration > 0 else { return }
+        pixelsPerSecond = min(200, max(5, (width - 150) / totalDuration))
     }
 
     func seek(to seconds: Double) {
@@ -200,6 +356,8 @@ final class EditorModel: ObservableObject {
             guard !Task.isCancelled else { return }
             let item = AVPlayerItem(asset: out.composition)
             item.videoComposition = out.videoComposition
+            item.audioMix = out.audioMix
+            item.audioTimePitchAlgorithm = .spectral
             player.replaceCurrentItem(with: item)
             seek(to: keepTime)
             if wasPlaying { player.play() }
@@ -236,6 +394,8 @@ final class EditorModel: ObservableObject {
             session.outputURL = url
             session.outputFileType = .mp4
             session.videoComposition = out.videoComposition
+            session.audioMix = out.audioMix
+            session.audioTimePitchAlgorithm = .spectral
             session.shouldOptimizeForNetworkUse = true
 
             let timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
