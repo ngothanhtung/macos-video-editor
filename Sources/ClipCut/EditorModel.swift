@@ -22,7 +22,7 @@ enum ExportPreset: String, CaseIterable, Identifiable {
 
 @MainActor
 final class EditorModel: ObservableObject {
-    @Published var clips: [Clip] = [] { didSet { scheduleRebuild(); markUnsaved() } }
+    @Published var clips: [Clip] = [] { didSet { clipsChanged(from: oldValue); markUnsaved() } }
     @Published var selection: Clip.ID? { didSet { if selection != nil { selectedOverlayID = nil } } }
     @Published var muted = false { didSet { scheduleRebuild(); markUnsaved() } }
 
@@ -338,6 +338,20 @@ final class EditorModel: ObservableObject {
         clips[i] = c
     }
 
+    // MARK: - Chỉnh màu
+
+    /// `record: false` khi kéo slider (đã checkpoint lúc bắt đầu kéo).
+    func updateColor(record: Bool = true, _ change: (inout ColorAdjust) -> Void) {
+        updateTarget(record: record) { change(&$0.color) }
+    }
+
+    func applyColorToAll() {
+        guard let color = targetClip?.color, clips.contains(where: { $0.color != color }) else { return }
+        checkpoint()
+        clips = clips.map { var c = $0; c.color = color; return c }
+        status = "Đã áp màu cho \(clips.count) clip"
+    }
+
     static let speedRange: ClosedRange<Double> = 0.1...10
 
     /// Đặt tốc độ, làm tròn theo bước 0.1x. `record: false` khi kéo slider (đã checkpoint lúc bắt đầu kéo).
@@ -398,6 +412,30 @@ final class EditorModel: ObservableObject {
 
     // MARK: - Dựng preview
 
+    /// Màu từng clip cho handler Core Image của preview.
+    let colorStore = ColorStore()
+
+    /// Chỉ đổi thông số màu thì vẽ lại frame, không dựng lại composition (kéo slider mượt).
+    /// Bật / tắt chỉnh màu của một clip vẫn phải dựng lại vì đổi cách ghép frame.
+    private func clipsChanged(from old: [Clip]) {
+        colorStore.set(clips)
+        func structure(_ list: [Clip]) -> [Clip] {
+            list.map { var c = $0; c.color = c.color.isIdentity ? ColorAdjust() : ColorAdjust(vignette: 1); return c }
+        }
+        if structure(old) != structure(clips) {
+            scheduleRebuild()
+        } else if old != clips {
+            refreshFrame()
+        }
+    }
+
+    /// Khi đang dừng, AVPlayer không tự vẽ lại; gán lại videoComposition để frame hiện tại lấy màu mới.
+    private func refreshFrame() {
+        guard player.timeControlStatus != .playing, let item = player.currentItem,
+              let vc = item.videoComposition?.mutableCopy() as? AVVideoComposition else { return }
+        item.videoComposition = vc
+    }
+
     private func scheduleRebuild() {
         rebuildTask?.cancel()
         rebuildTask = Task {
@@ -416,7 +454,7 @@ final class EditorModel: ObservableObject {
             return
         }
         do {
-            let out = try await CompositionBuilder.build(clips: snapshot, muted: muted)
+            let out = try await CompositionBuilder.build(clips: snapshot, muted: muted, colors: colorStore)
             guard !Task.isCancelled else { return }
             let item = AVPlayerItem(asset: out.composition)
             item.videoComposition = out.videoComposition

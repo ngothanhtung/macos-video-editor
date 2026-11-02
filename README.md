@@ -11,6 +11,9 @@ Trình edit video tối giản cho macOS, viết bằng Swift + SwiftUI + AVFoun
 - Tự xoay đúng video quay dọc; clip khác tỉ lệ được scale-to-fit (viền đen)
 - Tắt tiếng toàn bộ
 - Xuất MP4: HEVC hoặc H.264 (cao nhất / 1080p / 720p), dùng mã hóa phần cứng
+- Chỉnh màu từng clip: phơi sáng, tương phản, vùng sáng / tối, bão hòa, độ rực, nhiệt độ, tông màu,
+  viền tối, cùng 7 preset (Rực rỡ, Ấm, Lạnh, Điện ảnh, Phai màu, Đen trắng…). Preview đổi ngay khi kéo,
+  có nút áp cùng màu cho mọi clip
 - Đối tượng vẽ đè (overlay): mũi tên, đường thẳng, hình chữ nhật, elip, tô sáng, chữ.
   Vẽ trực tiếp trên preview, chỉnh màu / nét / cỡ chữ, kéo trên timeline để đổi thời điểm hiện
 - Lưu / mở dự án `.clipcut` (⌘S, ⇧⌘S, ⇧⌘O); file JSON chỉ lưu đường dẫn tới video gốc
@@ -32,8 +35,10 @@ Hoặc mở bằng Xcode: `open Package.swift`, chọn scheme ClipCut, ⌘R.
 | File | Vai trò |
 |---|---|
 | `ClipCutApp.swift` | Entry point, menu & phím tắt |
+| `ColorAdjust.swift` | Thông số chỉnh màu, preset, chuỗi bộ lọc Core Image |
+| `ColorPanel.swift` | Bảng chỉnh màu (preset + slider) mở từ thanh công cụ timeline |
 | `Clip.swift` | Model clip + tiện ích thời gian |
-| `CompositionBuilder.swift` | Dựng `AVMutableComposition` + `AVMutableVideoComposition` (xoay, scale-to-fit, tốc độ, ghép overlay khi xuất) |
+| `CompositionBuilder.swift` | Dựng `AVMutableComposition` + `AVMutableVideoComposition` (xoay, scale-to-fit, tốc độ, chỉnh màu, ghép overlay khi xuất) |
 | `EditorModel.swift` | State, nhập file, trim/split/move, undo, preview, export |
 | `EditorModel+Overlays.swift` | Thêm / sửa / xóa overlay, kiểu vẽ, xếp làn trên timeline |
 | `EditorModel+Project.swift` | Lưu / mở / tạo mới dự án `.clipcut` |
@@ -55,4 +60,5 @@ Hoặc mở bằng Xcode: `open Package.swift`, chọn scheme ClipCut, ⌘R.
 - Khung xuất lấy theo clip đầu tiên.
 - Tải YouTube ưu tiên H.264 (tối đa 1080p) để AVFoundation mở được; không có `ffmpeg` thì chỉ lấy
   được bản MP4 gộp sẵn (thường ≤ 720p). Video riêng tư, giới hạn tuổi hoặc cần đăng nhập không tải được.
+- Thumbnail trên timeline vẫn hiện màu gốc, chưa theo chỉnh màu.
 - Chưa có transition. Overlay không có hiệu ứng xuất hiện / biến mất.

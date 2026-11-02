@@ -7,6 +7,7 @@ struct EditToolbar: View {
     @EnvironmentObject var model: EditorModel
     @State private var showVolume = false
     @State private var showSpeed = false
+    @State private var showColor = false
     @FocusState private var speedFieldFocused: Bool
     @State private var timelineWidth: Double = 800
 
@@ -47,6 +48,8 @@ struct EditToolbar: View {
             .keyboardShortcut("d")
             speedMenu
             volumeButton
+            tool(.symbol("camera.filters"), "Chỉnh màu", enabled: canEditTarget) { showColor.toggle() }
+                .popover(isPresented: $showColor, arrowEdge: .bottom) { ColorPanel() }
             tool(.symbol("crop.rotate"), "Xoay 90°", shortcut: "⌘R", enabled: canEditTarget) { model.rotateTarget() }
                 .keyboardShortcut("r")
             tool(.mirror, "Lật ngang", enabled: canEditTarget) { model.flipTargetHorizontal() }

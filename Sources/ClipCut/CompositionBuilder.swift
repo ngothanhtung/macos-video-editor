@@ -23,8 +23,10 @@ enum CompositionBuilder {
         let clip: Clip
     }
 
-    /// `overlays` chỉ truyền khi xuất: khi đó khung hình được ghép bằng Core Image để vẽ overlay lên.
-    static func build(clips: [Clip], muted: Bool, overlays: [Overlay] = []) async throws -> Output {
+    /// `overlays` chỉ truyền khi xuất (preview vẽ overlay bằng SwiftUI). Có overlay hoặc clip chỉnh màu
+    /// thì khung hình được ghép bằng Core Image. `colors` (chỉ preview) cho phép đổi màu mà không dựng lại.
+    static func build(clips: [Clip], muted: Bool, overlays: [Overlay] = [],
+                      colors: ColorStore? = nil) async throws -> Output {
         let composition = AVMutableComposition()
         guard let videoTrack = composition.addMutableTrack(
             withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)
@@ -92,8 +94,8 @@ enum CompositionBuilder {
             return mix
         }
 
-        if !overlays.isEmpty {
-            let vc = overlayComposition(composition, segments: segments, overlays: overlays, size: size)
+        if !overlays.isEmpty || clips.contains(where: { !$0.color.isIdentity }) {
+            let vc = ciComposition(composition, segments: segments, overlays: overlays, colors: colors, size: size)
             vc.frameDuration = frameDuration
             return Output(composition: composition, videoComposition: vc, audioMix: audioMix)
         }
@@ -116,25 +118,28 @@ enum CompositionBuilder {
         return Output(composition: composition, videoComposition: videoComposition, audioMix: audioMix)
     }
 
-    /// Ghép từng frame bằng Core Image: đặt frame nguồn theo transform của clip (giống layer instruction),
-    /// nền đen, rồi phủ ảnh overlay đang hiện ở thời điểm đó.
-    private static func overlayComposition(_ composition: AVComposition, segments: [Segment],
-                                           overlays: [Overlay], size: CGSize) -> AVMutableVideoComposition {
+    /// Ghép từng frame bằng Core Image: chỉnh màu frame nguồn, đặt theo transform của clip
+    /// (giống layer instruction), nền đen, rồi phủ ảnh overlay đang hiện ở thời điểm đó.
+    private static func ciComposition(_ composition: AVComposition, segments: [Segment], overlays: [Overlay],
+                                      colors: ColorStore?, size: CGSize) -> AVMutableVideoComposition {
         let canvas = CGRect(origin: .zero, size: size)
         // Transform của AVFoundation dùng trục y hướng xuống, Core Image hướng lên: lật trước và sau.
         let flipDst = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: size.height)
-        let placements: [(start: CMTime, transform: CGAffineTransform)] = segments.map { seg in
+        let placements: [(start: CMTime, transform: CGAffineTransform, clip: Clip)] = segments.map { seg in
             let flipSrc = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: seg.naturalSize.height)
             let fit = fitTransform(natural: seg.naturalSize, preferred: seg.transform, clip: seg.clip, into: size)
-            return (seg.range.start, flipSrc.concatenating(fit).concatenating(flipDst))
+            return (seg.range.start, flipSrc.concatenating(fit).concatenating(flipDst), seg.clip)
         }
         let raster = OverlayRasterizer(overlays: overlays, size: size)
         let black = CIImage(color: .black).cropped(to: canvas)
 
         let vc = AVMutableVideoComposition(asset: composition) { request in
             let t = request.compositionTime
-            let transform = (placements.last { $0.start <= t } ?? placements[0]).transform
-            var frame = request.sourceImage.transformed(by: transform).composited(over: black)
+            let placement = placements.last { $0.start <= t } ?? placements[0]
+            let color = colors?.color(for: placement.clip.id) ?? placement.clip.color
+            var frame = color.apply(to: request.sourceImage)
+                .transformed(by: placement.transform)
+                .composited(over: black)
             if let overlay = raster.image(at: t.seconds) { frame = overlay.composited(over: frame) }
             request.finish(with: frame.cropped(to: canvas), context: nil)
         }

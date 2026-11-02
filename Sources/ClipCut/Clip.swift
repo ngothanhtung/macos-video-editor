@@ -18,6 +18,8 @@ struct Clip: Identifiable, Equatable, Codable {
     var flipV = false
     /// Clip đóng băng: một khung hình kéo dài, không có tiếng, không trim được.
     var isFreeze = false
+    /// Chỉnh màu riêng của clip.
+    var color = ColorAdjust()
 
     init(url: URL, assetDuration: Double, start: Double = 0, end: Double? = nil) {
         self.id = UUID()
@@ -36,6 +38,7 @@ struct Clip: Identifiable, Equatable, Codable {
         c.flipH = flipH
         c.flipV = flipV
         c.isFreeze = isFreeze
+        c.color = color
         return c
     }
 
@@ -47,6 +50,29 @@ struct Clip: Identifiable, Equatable, Codable {
 
     /// Đổi thời gian tính từ đầu clip trên timeline sang thời gian trong file gốc.
     func sourceTime(atLocal t: Double) -> Double { start + t * speed }
+}
+
+extension Clip {
+    private enum CodingKeys: String, CodingKey {
+        case id, url, assetDuration, start, end, speed, volume, quarterTurns, flipH, flipV, isFreeze, color
+    }
+
+    /// Thuộc tính mới thêm sau có thể thiếu trong file dự án cũ: lấy giá trị mặc định.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        url = try c.decode(URL.self, forKey: .url)
+        assetDuration = try c.decode(Double.self, forKey: .assetDuration)
+        start = try c.decode(Double.self, forKey: .start)
+        end = try c.decode(Double.self, forKey: .end)
+        speed = try c.decodeIfPresent(Double.self, forKey: .speed) ?? 1
+        volume = try c.decodeIfPresent(Double.self, forKey: .volume) ?? 1
+        quarterTurns = try c.decodeIfPresent(Int.self, forKey: .quarterTurns) ?? 0
+        flipH = try c.decodeIfPresent(Bool.self, forKey: .flipH) ?? false
+        flipV = try c.decodeIfPresent(Bool.self, forKey: .flipV) ?? false
+        isFreeze = try c.decodeIfPresent(Bool.self, forKey: .isFreeze) ?? false
+        color = try c.decodeIfPresent(ColorAdjust.self, forKey: .color) ?? ColorAdjust()
+    }
 }
 
 extension Double {
