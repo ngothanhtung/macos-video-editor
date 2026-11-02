@@ -4,25 +4,26 @@ import AVKit
 struct ContentView: View {
     @EnvironmentObject var model: EditorModel
     @State private var dropTargeted = false
+    /// Panel thông tin bên phải, mặc định ẩn; bật bằng nút Info trên thanh công cụ.
+    @State private var showInspector = false
 
     var body: some View {
-        HSplitView {
-            VStack(spacing: 0) {
-                preview
-                PlaybackBar()
-                    .zIndex(2)
-                Divider()
-                EditToolbar()
-                    .zIndex(1) // tooltip tràn xuống timeline
-                Divider()
-                ClipTimeline()
-                    .frame(minHeight: 150, idealHeight: 170, maxHeight: 220)
-                statusBar
-            }
-            .frame(minWidth: 680)
-
+        VStack(spacing: 0) {
+            preview
+            PlaybackBar()
+                .zIndex(2)
+            Divider()
+            EditToolbar()
+                .zIndex(1) // tooltip tràn xuống timeline
+            Divider()
+            ClipTimeline()
+                .frame(minHeight: 150, idealHeight: 170, maxHeight: 220)
+            statusBar
+        }
+        .frame(minWidth: 680)
+        .inspector(isPresented: $showInspector) {
             InspectorView()
-                .frame(minWidth: 260, idealWidth: 280, maxWidth: 340)
+                .inspectorColumnWidth(min: 260, ideal: 280, max: 340)
         }
         .toolbar { toolbarContent }
         .dropDestination(for: URL.self) { urls, _ in
@@ -79,6 +80,11 @@ struct ContentView: View {
             .frame(width: 220)
             Button { model.promptExport() } label: { Label("Xuất", systemImage: "square.and.arrow.up") }
                 .disabled(model.clips.isEmpty || model.isExporting)
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Toggle(isOn: $showInspector) { Label("Thông tin", systemImage: "info.circle") }
+                .keyboardShortcut("i")
+                .help("Hiện / ẩn panel thông tin (⌘I)")
         }
     }
 }

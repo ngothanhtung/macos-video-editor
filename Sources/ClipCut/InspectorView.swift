@@ -20,24 +20,6 @@ struct InspectorView: View {
                     row("Số clip", "\(model.clips.count)")
                     row("Tổng thời lượng", model.totalDuration.timecode)
                 }
-
-                Divider()
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Phím tắt").font(.headline)
-                    shortcut("Space", "Phát / dừng")
-                    shortcut("⌘B", "Cắt tại playhead")
-                    shortcut("I / O", "Đặt điểm đầu / cuối")
-                    shortcut("Q / W", "Xóa trái / phải playhead")
-                    shortcut("⌫", "Xóa clip")
-                    shortcut("⌘D", "Nhân đôi clip")
-                    shortcut("F", "Đóng băng khung hình")
-                    shortcut("M", "Marker")
-                    shortcut("⌘R", "Xoay 90°")
-                    shortcut("⌘Z / ⇧⌘Z", "Hoàn tác / làm lại")
-                    shortcut("⌘O", "Nhập video")
-                    shortcut("⌘E", "Xuất video")
-                }
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -112,14 +94,5 @@ struct InspectorView: View {
             Text(value).monospacedDigit()
         }
         .font(.callout)
-    }
-
-    private func shortcut(_ key: String, _ action: String) -> some View {
-        HStack {
-            Text(key).font(.system(.caption, design: .monospaced))
-                .padding(.horizontal, 5).padding(.vertical, 1)
-                .background(.quaternary, in: RoundedRectangle(cornerRadius: 3))
-            Text(action).font(.caption)
-        }
     }
 }
