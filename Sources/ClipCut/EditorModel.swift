@@ -22,12 +22,12 @@ enum ExportPreset: String, CaseIterable, Identifiable {
 
 @MainActor
 final class EditorModel: ObservableObject {
-    @Published var clips: [Clip] = [] { didSet { scheduleRebuild(); hasUnsavedChanges = true } }
+    @Published var clips: [Clip] = [] { didSet { scheduleRebuild(); markUnsaved() } }
     @Published var selection: Clip.ID? { didSet { if selection != nil { selectedOverlayID = nil } } }
-    @Published var muted = false { didSet { scheduleRebuild(); hasUnsavedChanges = true } }
+    @Published var muted = false { didSet { scheduleRebuild(); markUnsaved() } }
 
     // Overlay (chữ, mũi tên, hình…) — xem EditorModel+Overlays.swift
-    @Published var overlays: [Overlay] = [] { didSet { hasUnsavedChanges = true } }
+    @Published var overlays: [Overlay] = [] { didSet { markUnsaved() } }
     @Published var selectedOverlayID: Overlay.ID? { didSet { if selectedOverlayID != nil { selection = nil } } }
     /// Công cụ vẽ đang chọn; nil = chọn / di chuyển.
     @Published var overlayTool: OverlayKind?
@@ -43,6 +43,11 @@ final class EditorModel: ObservableObject {
     // Dự án — xem EditorModel+Project.swift
     @Published var projectURL: URL?
     @Published var hasUnsavedChanges = false
+
+    /// Chỉ phát thay đổi khi cờ đổi giá trị: gán lại `true` mỗi lần sửa cũng làm cả giao diện vẽ lại.
+    private func markUnsaved() {
+        if !hasUnsavedChanges { hasUnsavedChanges = true }
+    }
     @Published var thumbnails: [Clip.ID: NSImage] = [:]
     @Published var currentTime: Double = 0
     @Published var pixelsPerSecond: Double = 40
@@ -359,7 +364,7 @@ final class EditorModel: ObservableObject {
 
     // MARK: - Marker
 
-    @Published var markers: [Double] = [] { didSet { hasUnsavedChanges = true } }
+    @Published var markers: [Double] = [] { didSet { markUnsaved() } }
 
     /// Thêm marker tại playhead, hoặc gỡ nếu đã có marker sát đó.
     func toggleMarker() {

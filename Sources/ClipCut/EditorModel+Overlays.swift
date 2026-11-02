@@ -63,14 +63,6 @@ extension EditorModel {
         overlayStyle.textBackground = o.textBackground
     }
 
-    /// Dời khoảng hiện của overlay trên timeline (giữ nguyên độ dài, không âm).
-    func moveOverlayTime(_ id: Overlay.ID, start: Double, length: Double) {
-        updateOverlay(id) {
-            $0.start = max(0, start)
-            $0.end = $0.start + length
-        }
-    }
-
     /// Xếp overlay vào các làn không chồng nhau để vẽ trên timeline.
     var overlayLanes: (lanes: [Overlay.ID: Int], count: Int) {
         var laneEnds: [Double] = []

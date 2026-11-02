@@ -9,6 +9,9 @@ struct ClipTimeline: View {
     @EnvironmentObject var model: EditorModel
 
     static let laneHeight: CGFloat = 20
+    /// Hệ trục cố định của nội dung timeline. Kéo trim / dời đo theo hệ này thay vì hệ của chính
+    /// khối đang bị kéo (khối di chuyển theo tay sẽ làm lượng kéo đo được dao động → giật).
+    static let space = "timeline"
 
     var body: some View {
         let layout = model.overlayLanes
@@ -40,6 +43,7 @@ struct ClipTimeline: View {
                 markers
                 playhead
             }
+            .coordinateSpace(name: Self.space)
             .padding(.horizontal, 12)
             .frame(maxHeight: .infinity, alignment: .top)
         }
@@ -186,7 +190,7 @@ private struct ClipCard: View {
                 if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
             }
             .gesture(
-                DragGesture(minimumDistance: 1)
+                DragGesture(minimumDistance: 1, coordinateSpace: .named(ClipTimeline.space))
                     .onChanged { v in
                         if dragBase == nil {
                             dragBase = (clip.start, clip.end)
@@ -208,14 +212,21 @@ private struct ClipCard: View {
 }
 
 /// Một overlay trên timeline: bấm để chọn, kéo thân để dời thời điểm, kéo mép để đổi thời lượng.
+/// Trong lúc kéo chỉ cập nhật trạng thái cục bộ của khối (mượt, không vẽ lại cả cửa sổ),
+/// thả tay mới ghi vào model thành một bước hoàn tác.
 private struct OverlayBar: View {
     @EnvironmentObject var model: EditorModel
     let overlay: Overlay
 
-    @State private var dragBase: (start: Double, end: Double)?
+    private enum Edge { case body, leading, trailing }
+
+    /// Khoảng thời gian đang kéo (nil khi không kéo).
+    @State private var live: (start: Double, end: Double)?
 
     private var isSelected: Bool { model.selectedOverlayID == overlay.id }
     private var pps: Double { model.pixelsPerSecond }
+    private var start: Double { live?.start ?? overlay.start }
+    private var end: Double { live?.end ?? overlay.end }
 
     var body: some View {
         HStack(spacing: 3) {
@@ -225,65 +236,72 @@ private struct OverlayBar: View {
         .font(.system(size: 10, weight: .medium))
         .foregroundStyle(overlay.color.isLight ? Color.black : Color.white)
         .padding(.horizontal, 6)
-        .frame(width: max(10, overlay.duration * pps), height: ClipTimeline.laneHeight - 3, alignment: .leading)
+        .frame(width: max(10, (end - start) * pps), height: ClipTimeline.laneHeight - 3, alignment: .leading)
         .background(overlay.color.opacity(0.85).color, in: RoundedRectangle(cornerRadius: 4))
         .overlay(
             RoundedRectangle(cornerRadius: 4)
-                .strokeBorder(isSelected ? Color.yellow : Color.black.opacity(0.25), lineWidth: isSelected ? 2 : 0.5)
+                .strokeBorder(isSelected || live != nil ? Color.yellow : Color.black.opacity(0.25),
+                              lineWidth: isSelected || live != nil ? 2 : 0.5)
         )
         .clipShape(RoundedRectangle(cornerRadius: 4))
-        .overlay(alignment: .leading) { edgeHandle(leading: true) }
-        .overlay(alignment: .trailing) { edgeHandle(leading: false) }
+        .overlay(alignment: .leading) { edgeHandle(.leading) }
+        .overlay(alignment: .trailing) { edgeHandle(.trailing) }
+        .overlay(alignment: .topLeading) { if live != nil { timeBadge } }
         .contentShape(Rectangle())
         .onTapGesture {
             model.selectOverlay(overlay.id)
             if !overlay.isVisible(at: model.currentTime) { model.seek(to: overlay.start) }
         }
-        .gesture(
-            DragGesture(minimumDistance: 2)
-                .onChanged { v in
-                    let base = begin()
-                    let delta = Double(v.translation.width) / pps
-                    model.moveOverlayTime(overlay.id, start: base.start + delta, length: base.end - base.start)
-                }
-                .onEnded { _ in dragBase = nil }
-        )
-        .offset(x: overlay.start * pps)
+        .gesture(drag(.body, minimumDistance: 2))
+        .offset(x: start * pps)
         .help("\(overlay.label): \(overlay.start.timecode) – \(overlay.end.timecode)")
     }
 
-    /// Lần đầu kéo: chọn overlay, ghi bước hoàn tác và nhớ vị trí gốc.
-    private func begin() -> (start: Double, end: Double) {
-        if let dragBase { return dragBase }
-        model.selectOverlay(overlay.id)
-        model.checkpoint()
-        let base = (overlay.start, overlay.end)
-        dragBase = base
-        return base
+    /// Mốc thời gian hiện phía trên khối trong lúc kéo.
+    private var timeBadge: some View {
+        Text("\(start.timecode) – \(end.timecode)")
+            .font(.system(size: 9, design: .monospaced))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 4).padding(.vertical, 1)
+            .background(Color.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 3))
+            .fixedSize()
+            .offset(y: -14)
+            .allowsHitTesting(false)
     }
 
-    private func edgeHandle(leading: Bool) -> some View {
+    private func edgeHandle(_ edge: Edge) -> some View {
         Color.clear
             .frame(width: 6)
             .contentShape(Rectangle())
             .onHover { inside in
                 if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
             }
-            .gesture(
-                DragGesture(minimumDistance: 1)
-                    .onChanged { v in
-                        let base = begin()
-                        let delta = Double(v.translation.width) / pps
-                        let minLen = 0.2
-                        model.updateOverlay(overlay.id) {
-                            if leading {
-                                $0.start = min(max(0, base.start + delta), base.end - minLen)
-                            } else {
-                                $0.end = max(base.end + delta, base.start + minLen)
-                            }
-                        }
-                    }
-                    .onEnded { _ in dragBase = nil }
-            )
+            .gesture(drag(edge, minimumDistance: 1))
+    }
+
+    private func drag(_ edge: Edge, minimumDistance: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: minimumDistance, coordinateSpace: .named(ClipTimeline.space))
+            .onChanged { v in
+                if live == nil, !isSelected { model.selectOverlay(overlay.id) }
+                let delta = Double(v.translation.width) / pps
+                let s = overlay.start, e = overlay.end, minLen = 0.2
+                switch edge {
+                case .body:
+                    let newStart = max(0, s + delta)
+                    live = (newStart, newStart + (e - s))
+                case .leading:
+                    live = (min(max(0, s + delta), e - minLen), e)
+                case .trailing:
+                    live = (s, max(e + delta, s + minLen))
+                }
+            }
+            .onEnded { _ in
+                guard let live else { return }
+                model.updateOverlay(overlay.id, record: true) {
+                    $0.start = live.start
+                    $0.end = live.end
+                }
+                self.live = nil
+            }
     }
 }
