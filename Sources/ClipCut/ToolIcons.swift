@@ -107,6 +107,8 @@ private struct ToolTip: ViewModifier {
     let title: String
     let shortcut: String?
 
+    private static let bubbleHeight: CGFloat = 24
+
     @State private var visible = false
     @State private var pending: Task<Void, Never>?
 
@@ -126,13 +128,16 @@ private struct ToolTip: ViewModifier {
             }
             .overlay(alignment: .bottom) {
                 if visible {
+                    // đáy bong bóng khớp đáy nút, rồi dời xuống hết chiều cao bong bóng + 6pt
                     bubble
                         .fixedSize()
-                        .alignmentGuide(.bottom) { d in d[.top] - 6 }
+                        .offset(y: Self.bubbleHeight + 6)
                         .allowsHitTesting(false)
                         .transition(.opacity)
                 }
             }
+            // đưa nút đang hiện tooltip lên trên các nút cùng hàng, nếu không bong bóng bị nút bên phải che
+            .zIndex(visible ? 1 : 0)
     }
 
     private var bubble: some View {
@@ -147,7 +152,8 @@ private struct ToolTip: ViewModifier {
         }
         .font(.system(size: 11))
         .foregroundStyle(.white)
-        .padding(.horizontal, 8).padding(.vertical, 5)
+        .padding(.horizontal, 8)
+        .frame(height: Self.bubbleHeight)
         .background(Color(white: 0.13), in: RoundedRectangle(cornerRadius: 6))
         .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.white.opacity(0.08)))
         .shadow(color: .black.opacity(0.35), radius: 6, y: 2)
