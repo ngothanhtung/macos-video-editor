@@ -4,11 +4,16 @@ import SwiftUI
 /// - Bấm vào clip: chọn + tua tới vị trí bấm
 /// - Kéo mép trái/phải: trim
 /// - Kéo cả khối thả lên clip khác: đổi thứ tự
+/// Phía trên các clip là làn overlay (chữ, mũi tên…): kéo để dời, kéo mép để đổi thời lượng.
 struct ClipTimeline: View {
     @EnvironmentObject var model: EditorModel
 
+    static let laneHeight: CGFloat = 20
+
     var body: some View {
-        ScrollView(.horizontal) {
+        let layout = model.overlayLanes
+        let overlayHeight = CGFloat(layout.count) * Self.laneHeight
+        return ScrollView(.horizontal) {
             ZStack(alignment: .topLeading) {
                 HStack(spacing: 0) {
                     ForEach(model.clips) { clip in
@@ -24,7 +29,12 @@ struct ClipTimeline: View {
                             return true
                         }
                 }
-                .padding(.top, 22)
+                .padding(.top, 22 + overlayHeight + (layout.count > 0 ? 4 : 0))
+
+                ForEach(model.overlays) { o in
+                    OverlayBar(overlay: o)
+                        .offset(y: 22 + CGFloat(layout.lanes[o.id] ?? 0) * Self.laneHeight)
+                }
 
                 ruler
                 markers
@@ -190,6 +200,87 @@ private struct ClipCard: View {
                             model.setTrim(id: clip.id, start: base.start + delta)
                         } else {
                             model.setTrim(id: clip.id, end: base.end + delta)
+                        }
+                    }
+                    .onEnded { _ in dragBase = nil }
+            )
+    }
+}
+
+/// Một overlay trên timeline: bấm để chọn, kéo thân để dời thời điểm, kéo mép để đổi thời lượng.
+private struct OverlayBar: View {
+    @EnvironmentObject var model: EditorModel
+    let overlay: Overlay
+
+    @State private var dragBase: (start: Double, end: Double)?
+
+    private var isSelected: Bool { model.selectedOverlayID == overlay.id }
+    private var pps: Double { model.pixelsPerSecond }
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: overlay.kind.symbol)
+            Text(overlay.label).lineLimit(1)
+        }
+        .font(.system(size: 10, weight: .medium))
+        .foregroundStyle(overlay.color.isLight ? Color.black : Color.white)
+        .padding(.horizontal, 6)
+        .frame(width: max(10, overlay.duration * pps), height: ClipTimeline.laneHeight - 3, alignment: .leading)
+        .background(overlay.color.opacity(0.85).color, in: RoundedRectangle(cornerRadius: 4))
+        .overlay(
+            RoundedRectangle(cornerRadius: 4)
+                .strokeBorder(isSelected ? Color.yellow : Color.black.opacity(0.25), lineWidth: isSelected ? 2 : 0.5)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .overlay(alignment: .leading) { edgeHandle(leading: true) }
+        .overlay(alignment: .trailing) { edgeHandle(leading: false) }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            model.selectOverlay(overlay.id)
+            if !overlay.isVisible(at: model.currentTime) { model.seek(to: overlay.start) }
+        }
+        .gesture(
+            DragGesture(minimumDistance: 2)
+                .onChanged { v in
+                    let base = begin()
+                    let delta = Double(v.translation.width) / pps
+                    model.moveOverlayTime(overlay.id, start: base.start + delta, length: base.end - base.start)
+                }
+                .onEnded { _ in dragBase = nil }
+        )
+        .offset(x: overlay.start * pps)
+        .help("\(overlay.label): \(overlay.start.timecode) – \(overlay.end.timecode)")
+    }
+
+    /// Lần đầu kéo: chọn overlay, ghi bước hoàn tác và nhớ vị trí gốc.
+    private func begin() -> (start: Double, end: Double) {
+        if let dragBase { return dragBase }
+        model.selectOverlay(overlay.id)
+        model.checkpoint()
+        let base = (overlay.start, overlay.end)
+        dragBase = base
+        return base
+    }
+
+    private func edgeHandle(leading: Bool) -> some View {
+        Color.clear
+            .frame(width: 6)
+            .contentShape(Rectangle())
+            .onHover { inside in
+                if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+            }
+            .gesture(
+                DragGesture(minimumDistance: 1)
+                    .onChanged { v in
+                        let base = begin()
+                        let delta = Double(v.translation.width) / pps
+                        let minLen = 0.2
+                        model.updateOverlay(overlay.id) {
+                            if leading {
+                                $0.start = min(max(0, base.start + delta), base.end - minLen)
+                            } else {
+                                $0.end = max(base.end + delta, base.start + minLen)
+                            }
                         }
                     }
                     .onEnded { _ in dragBase = nil }

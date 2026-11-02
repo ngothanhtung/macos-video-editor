@@ -22,9 +22,27 @@ enum ExportPreset: String, CaseIterable, Identifiable {
 
 @MainActor
 final class EditorModel: ObservableObject {
-    @Published var clips: [Clip] = [] { didSet { scheduleRebuild() } }
-    @Published var selection: Clip.ID?
-    @Published var muted = false { didSet { scheduleRebuild() } }
+    @Published var clips: [Clip] = [] { didSet { scheduleRebuild(); hasUnsavedChanges = true } }
+    @Published var selection: Clip.ID? { didSet { if selection != nil { selectedOverlayID = nil } } }
+    @Published var muted = false { didSet { scheduleRebuild(); hasUnsavedChanges = true } }
+
+    // Overlay (chữ, mũi tên, hình…) — xem EditorModel+Overlays.swift
+    @Published var overlays: [Overlay] = [] { didSet { hasUnsavedChanges = true } }
+    @Published var selectedOverlayID: Overlay.ID? { didSet { if selectedOverlayID != nil { selection = nil } } }
+    /// Công cụ vẽ đang chọn; nil = chọn / di chuyển.
+    @Published var overlayTool: OverlayKind?
+    @Published var overlayStyle = OverlayStyle()
+    /// Kích thước khung hình của composition (để căn overlay trên preview).
+    @Published var renderSize: CGSize = .zero
+
+    /// Đang gõ trong ô nhập chữ: tắt các phím tắt một phím (I, O, Q, Space, ⌫…) để không nuốt ký tự.
+    @Published var isEditingText = false
+    /// Tăng lên để yêu cầu thanh chú thích focus ô sửa chữ (sau khi tạo / bấm đúp vào chữ).
+    @Published var textEditRequest = 0
+
+    // Dự án — xem EditorModel+Project.swift
+    @Published var projectURL: URL?
+    @Published var hasUnsavedChanges = false
     @Published var thumbnails: [Clip.ID: NSImage] = [:]
     @Published var currentTime: Double = 0
     @Published var pixelsPerSecond: Double = 40
@@ -70,6 +88,11 @@ final class EditorModel: ObservableObject {
     }
 
     func addFiles(_ urls: [URL]) {
+        // thả file dự án vào cửa sổ thì mở dự án
+        if let project = urls.first(where: { $0.pathExtension == Self.projectExtension }) {
+            openProject(at: project)
+            return
+        }
         Task {
             var skipped: [String] = []
             for url in urls {
@@ -93,7 +116,7 @@ final class EditorModel: ObservableObject {
         }
     }
 
-    private func loadThumbnail(for clip: Clip) {
+    func loadThumbnail(for clip: Clip) {
         Task {
             let gen = AVAssetImageGenerator(asset: AVURLAsset(url: clip.url))
             gen.appliesPreferredTrackTransform = true
@@ -108,32 +131,54 @@ final class EditorModel: ObservableObject {
 
     // MARK: - Lịch sử (undo / redo)
 
-    @Published private(set) var undoStack: [[Clip]] = []
-    @Published private(set) var redoStack: [[Clip]] = []
+    private struct Snapshot {
+        var clips: [Clip]
+        var overlays: [Overlay]
+    }
+
+    @Published private var undoStack: [Snapshot] = []
+    @Published private var redoStack: [Snapshot] = []
     var canUndo: Bool { !undoStack.isEmpty }
     var canRedo: Bool { !redoStack.isEmpty }
 
+    private var snapshot: Snapshot { Snapshot(clips: clips, overlays: overlays) }
+
     /// Lưu trạng thái hiện tại trước khi sửa. Thao tác kéo liên tục (trim, slider) chỉ gọi một lần lúc bắt đầu.
     func checkpoint() {
-        undoStack.append(clips)
+        undoStack.append(snapshot)
         if undoStack.count > 100 { undoStack.removeFirst() }
+        redoStack.removeAll()
+    }
+
+    /// Bỏ checkpoint vừa tạo khi thao tác hóa ra không đổi gì (bấm mà không kéo).
+    func discardLastCheckpoint() {
+        _ = undoStack.popLast()
+    }
+
+    func clearHistory() {
+        undoStack.removeAll()
         redoStack.removeAll()
     }
 
     func undo() {
         guard let prev = undoStack.popLast() else { return }
-        redoStack.append(clips)
-        clips = prev
-        if let id = selection, !clips.contains(where: { $0.id == id }) { selection = nil }
+        redoStack.append(snapshot)
+        restore(prev)
         status = "Hoàn tác"
     }
 
     func redo() {
         guard let next = redoStack.popLast() else { return }
-        undoStack.append(clips)
-        clips = next
-        if let id = selection, !clips.contains(where: { $0.id == id }) { selection = nil }
+        undoStack.append(snapshot)
+        restore(next)
         status = "Làm lại"
+    }
+
+    private func restore(_ s: Snapshot) {
+        if s.clips != clips { clips = s.clips }
+        overlays = s.overlays
+        if let id = selection, !clips.contains(where: { $0.id == id }) { selection = nil }
+        if let id = selectedOverlayID, !overlays.contains(where: { $0.id == id }) { selectedOverlayID = nil }
     }
 
     // MARK: - Chỉnh sửa
@@ -216,7 +261,14 @@ final class EditorModel: ObservableObject {
         status = "Đã xóa phần bên phải playhead"
     }
 
+    /// Xóa đối tượng overlay đang chọn, nếu không có thì xóa clip.
+    var canDelete: Bool { selectedOverlayID != nil || hasTarget }
+
     func removeSelected() {
+        if let id = selectedOverlayID {
+            removeOverlay(id)
+            return
+        }
         guard let i = targetIndex else { return }
         checkpoint()
         clips.remove(at: i)
@@ -307,7 +359,7 @@ final class EditorModel: ObservableObject {
 
     // MARK: - Marker
 
-    @Published var markers: [Double] = []
+    @Published var markers: [Double] = [] { didSet { hasUnsavedChanges = true } }
 
     /// Thêm marker tại playhead, hoặc gỡ nếu đã có marker sát đó.
     func toggleMarker() {
@@ -364,6 +416,7 @@ final class EditorModel: ObservableObject {
             item.audioMix = out.audioMix
             item.audioTimePitchAlgorithm = .spectral
             player.replaceCurrentItem(with: item)
+            renderSize = out.videoComposition?.renderSize ?? .zero
             seek(to: keepTime)
             if wasPlaying { player.play() }
         } catch {
@@ -390,7 +443,7 @@ final class EditorModel: ObservableObject {
         defer { isExporting = false }
 
         do {
-            let out = try await CompositionBuilder.build(clips: clips, muted: muted)
+            let out = try await CompositionBuilder.build(clips: clips, muted: muted, overlays: overlays)
             guard let session = AVAssetExportSession(asset: out.composition, presetName: exportPreset.avPreset) else {
                 status = "Preset không được hỗ trợ trên máy này."
                 return

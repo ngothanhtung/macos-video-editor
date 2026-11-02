@@ -7,6 +7,7 @@ struct EditToolbar: View {
     @EnvironmentObject var model: EditorModel
     @State private var showVolume = false
     @State private var showSpeed = false
+    @FocusState private var speedFieldFocused: Bool
     @State private var timelineWidth: Double = 800
 
     private static let speedPresets: [Double] = [0.5, 1, 1.5, 2, 3]
@@ -27,19 +28,19 @@ struct EditToolbar: View {
 
             tool(.split, "Tách", shortcut: "⌘B", enabled: hasClips) { model.splitAtPlayhead() }
             tool(.deleteLeft, "Xóa bên trái", shortcut: "Q", enabled: hasClips) { model.deleteLeftOfPlayhead() }
-                .keyboardShortcut("q", modifiers: [])
+                .singleKey("q", enabled: !model.isEditingText)
             tool(.deleteRight, "Xóa bên phải", shortcut: "W", enabled: hasClips) { model.deleteRightOfPlayhead() }
-                .keyboardShortcut("w", modifiers: [])
-            tool(.symbol("trash"), "Xóa", shortcut: "⌫", enabled: canEditTarget) { model.removeSelected() }
+                .singleKey("w", enabled: !model.isEditingText)
+            tool(.symbol("trash"), "Xóa", shortcut: "⌫", enabled: hasClips && model.canDelete) { model.removeSelected() }
             tool(.marker, "Thêm / gỡ marker", shortcut: "M", enabled: hasClips) { model.toggleMarker() }
-                .keyboardShortcut("m", modifiers: [])
+                .singleKey("m", enabled: !model.isEditingText)
 
             separator
 
             tool(.symbol("snowflake"), "Đóng băng khung hình (2 giây)", shortcut: "F", enabled: hasClips) {
                 model.freezeFrame()
             }
-            .keyboardShortcut("f", modifiers: [])
+            .singleKey("f", enabled: !model.isEditingText)
             tool(.symbol("plus.square.on.square"), "Nhân đôi", shortcut: "⌘D", enabled: canEditTarget) {
                 model.duplicateTarget()
             }
@@ -54,9 +55,9 @@ struct EditToolbar: View {
             separator
 
             textTool("I", "Đặt điểm đầu tại playhead", shortcut: "I") { model.markIn() }
-                .keyboardShortcut("i", modifiers: [])
+                .singleKey("i", enabled: !model.isEditingText)
             textTool("O", "Đặt điểm cuối tại playhead", shortcut: "O") { model.markOut() }
-                .keyboardShortcut("o", modifiers: [])
+                .singleKey("o", enabled: !model.isEditingText)
 
             Spacer(minLength: 8)
 
@@ -110,6 +111,8 @@ struct EditToolbar: View {
                 .textFieldStyle(.roundedBorder)
                 .multilineTextAlignment(.trailing)
                 .frame(width: 56)
+                .focused($speedFieldFocused)
+                .onChange(of: speedFieldFocused) { _, f in model.isEditingText = f }
                 Text("x")
             }
 
@@ -253,7 +256,7 @@ struct PlaybackBar: View {
             Button { model.togglePlay() } label: {
                 Image(systemName: "playpause.fill").font(.system(size: 16)).frame(width: 32, height: 24)
             }
-            .keyboardShortcut(.space, modifiers: [])
+            .singleKey(.space, enabled: !model.isEditingText)
             .toolTip("Phát / dừng", shortcut: "Space")
             Spacer()
             // giữ nút phát ở giữa

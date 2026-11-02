@@ -2,7 +2,7 @@ import Foundation
 import CoreMedia
 
 /// Một đoạn video trên timeline. `start`/`end` tính bằng giây, tương đối với file gốc.
-struct Clip: Identifiable, Equatable {
+struct Clip: Identifiable, Equatable, Codable {
     let id: UUID
     let url: URL
     let assetDuration: Double

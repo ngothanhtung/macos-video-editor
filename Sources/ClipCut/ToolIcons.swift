@@ -165,3 +165,13 @@ extension View {
         modifier(ToolTip(title: title, shortcut: shortcut))
     }
 }
+
+// MARK: - Phím tắt một phím
+
+extension View {
+    /// Phím tắt không kèm phím bổ trợ (I, O, Space…). Truyền `enabled: false` khi đang gõ chữ,
+    /// vì phím tắt của nút được xử lý trước ô nhập và sẽ nuốt mất ký tự.
+    func singleKey(_ key: KeyEquivalent, enabled: Bool) -> some View {
+        keyboardShortcut(enabled ? KeyboardShortcut(key, modifiers: []) : nil)
+    }
+}

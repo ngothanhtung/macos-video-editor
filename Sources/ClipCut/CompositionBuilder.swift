@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreGraphics
+import CoreImage
 
 /// Dựng AVMutableComposition + AVMutableVideoComposition từ danh sách clip.
 /// Composition chỉ tham chiếu tới file gốc nên dựng lại rất nhanh.
@@ -22,7 +23,8 @@ enum CompositionBuilder {
         let clip: Clip
     }
 
-    static func build(clips: [Clip], muted: Bool) async throws -> Output {
+    /// `overlays` chỉ truyền khi xuất: khi đó khung hình được ghép bằng Core Image để vẽ overlay lên.
+    static func build(clips: [Clip], muted: Bool, overlays: [Overlay] = []) async throws -> Output {
         let composition = AVMutableComposition()
         guard let videoTrack = composition.addMutableTrack(
             withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)
@@ -83,9 +85,22 @@ enum CompositionBuilder {
         let size = CGSize(width: (baseSize.width / 2).rounded() * 2,
                           height: (baseSize.height / 2).rounded() * 2)
 
+        let frameDuration = CMTime(value: 1, timescale: CMTimeScale(max(1, frameRate.rounded())))
+        let audioMix = volumeParams.map { params -> AVMutableAudioMix in
+            let mix = AVMutableAudioMix()
+            mix.inputParameters = [params]
+            return mix
+        }
+
+        if !overlays.isEmpty {
+            let vc = overlayComposition(composition, segments: segments, overlays: overlays, size: size)
+            vc.frameDuration = frameDuration
+            return Output(composition: composition, videoComposition: vc, audioMix: audioMix)
+        }
+
         let videoComposition = AVMutableVideoComposition()
         videoComposition.renderSize = size
-        videoComposition.frameDuration = CMTime(value: 1, timescale: CMTimeScale(max(1, frameRate.rounded())))
+        videoComposition.frameDuration = frameDuration
 
         videoComposition.instructions = segments.map { seg in
             let instruction = AVMutableVideoCompositionInstruction()
@@ -98,13 +113,33 @@ enum CompositionBuilder {
             return instruction
         }
 
-        let audioMix = volumeParams.map { params -> AVMutableAudioMix in
-            let mix = AVMutableAudioMix()
-            mix.inputParameters = [params]
-            return mix
-        }
-
         return Output(composition: composition, videoComposition: videoComposition, audioMix: audioMix)
+    }
+
+    /// Ghép từng frame bằng Core Image: đặt frame nguồn theo transform của clip (giống layer instruction),
+    /// nền đen, rồi phủ ảnh overlay đang hiện ở thời điểm đó.
+    private static func overlayComposition(_ composition: AVComposition, segments: [Segment],
+                                           overlays: [Overlay], size: CGSize) -> AVMutableVideoComposition {
+        let canvas = CGRect(origin: .zero, size: size)
+        // Transform của AVFoundation dùng trục y hướng xuống, Core Image hướng lên: lật trước và sau.
+        let flipDst = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: size.height)
+        let placements: [(start: CMTime, transform: CGAffineTransform)] = segments.map { seg in
+            let flipSrc = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: seg.naturalSize.height)
+            let fit = fitTransform(natural: seg.naturalSize, preferred: seg.transform, clip: seg.clip, into: size)
+            return (seg.range.start, flipSrc.concatenating(fit).concatenating(flipDst))
+        }
+        let raster = OverlayRasterizer(overlays: overlays, size: size)
+        let black = CIImage(color: .black).cropped(to: canvas)
+
+        let vc = AVMutableVideoComposition(asset: composition) { request in
+            let t = request.compositionTime
+            let transform = (placements.last { $0.start <= t } ?? placements[0]).transform
+            var frame = request.sourceImage.transformed(by: transform).composited(over: black)
+            if let overlay = raster.image(at: t.seconds) { frame = overlay.composited(over: frame) }
+            request.finish(with: frame.cropped(to: canvas), context: nil)
+        }
+        vc.renderSize = size
+        return vc
     }
 
     private static func orientedSize(_ natural: CGSize, _ t: CGAffineTransform) -> CGSize {

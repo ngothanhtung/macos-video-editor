@@ -19,24 +19,38 @@ struct ClipCutApp: App {
         }
         .commands {
             CommandGroup(replacing: .newItem) {
+                Button("Dự án mới") { model.newProject() }
+                    .keyboardShortcut("n")
+                Button("Mở dự án…") { model.promptOpenProject() }
+                    .keyboardShortcut("o", modifiers: [.command, .shift])
+                Divider()
                 Button("Nhập video…") { model.promptImport() }
                     .keyboardShortcut("o")
             }
+            CommandGroup(replacing: .saveItem) {
+                Button("Lưu dự án") { model.saveProject() }
+                    .keyboardShortcut("s")
+                Button("Lưu dự án thành…") { model.saveProject(saveAs: true) }
+                    .keyboardShortcut("s", modifiers: [.command, .shift])
+            }
+            // Khi đang gõ chữ, nhường ⌘Z và ⌫ cho ô nhập.
             CommandGroup(replacing: .undoRedo) {
                 Button("Hoàn tác") { model.undo() }
-                    .keyboardShortcut("z")
+                    .keyboardShortcut(model.isEditingText ? nil : KeyboardShortcut("z"))
                     .disabled(!model.canUndo)
                 Button("Làm lại") { model.redo() }
-                    .keyboardShortcut("z", modifiers: [.command, .shift])
+                    .keyboardShortcut(model.isEditingText ? nil : KeyboardShortcut("z", modifiers: [.command, .shift]))
                     .disabled(!model.canRedo)
             }
             CommandMenu("Chỉnh sửa video") {
                 Button("Cắt đôi tại playhead") { model.splitAtPlayhead() }
                     .keyboardShortcut("b")
                     .disabled(model.clips.isEmpty)
-                Button("Xóa clip đang chọn") { model.removeSelected() }
-                    .keyboardShortcut(.delete, modifiers: [])
-                    .disabled(!model.hasTarget)
+                Button(model.selectedOverlayID != nil ? "Xóa đối tượng đang chọn" : "Xóa clip đang chọn") {
+                    model.removeSelected()
+                }
+                .keyboardShortcut(model.isEditingText ? nil : KeyboardShortcut(.delete, modifiers: []))
+                .disabled(!model.canDelete)
                 Divider()
                 Button("Xuất video…") { model.promptExport() }
                     .keyboardShortcut("e")

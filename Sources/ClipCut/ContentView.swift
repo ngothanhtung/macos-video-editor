@@ -9,6 +9,9 @@ struct ContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            AnnotationBar()
+                .zIndex(3) // tooltip tràn xuống preview
+            Divider()
             preview
             PlaybackBar()
                 .zIndex(2)
@@ -17,7 +20,7 @@ struct ContentView: View {
                 .zIndex(1) // tooltip tràn xuống timeline
             Divider()
             ClipTimeline()
-                .frame(minHeight: 150, idealHeight: 170, maxHeight: 220)
+                .frame(minHeight: 150, idealHeight: 180, maxHeight: 280)
             statusBar
         }
         .frame(minWidth: 680)
@@ -26,6 +29,7 @@ struct ContentView: View {
                 .inspectorColumnWidth(min: 260, ideal: 280, max: 340)
         }
         .toolbar { toolbarContent }
+        .navigationTitle(model.windowTitle)
         .dropDestination(for: URL.self) { urls, _ in
             model.addFiles(urls.filter { $0.isFileURL })
             return true
@@ -44,6 +48,11 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
             } else {
                 PlayerView(player: model.player)
+                GeometryReader { geo in
+                    let rect = videoRect(in: geo.size)
+                    OverlayCanvas(size: rect.size)
+                        .position(x: rect.midX, y: rect.midY)
+                }
             }
             if dropTargeted {
                 RoundedRectangle(cornerRadius: 8)
@@ -52,6 +61,15 @@ struct ContentView: View {
             }
         }
         .frame(minHeight: 300)
+    }
+
+    /// Vùng khung hình thực trong preview (AVPlayerView vẽ aspect-fit).
+    private func videoRect(in container: CGSize) -> CGRect {
+        let video = model.renderSize
+        guard video.width > 0, video.height > 0 else { return CGRect(origin: .zero, size: container) }
+        let scale = min(container.width / video.width, container.height / video.height)
+        let w = video.width * scale, h = video.height * scale
+        return CGRect(x: (container.width - w) / 2, y: (container.height - h) / 2, width: w, height: h)
     }
 
     private var statusBar: some View {
@@ -73,6 +91,8 @@ struct ContentView: View {
     private var toolbarContent: some ToolbarContent {
         ToolbarItemGroup {
             Button { model.promptImport() } label: { Label("Nhập", systemImage: "plus") }
+            Button { model.saveProject() } label: { Label("Lưu dự án", systemImage: "square.and.arrow.down") }
+                .help("Lưu dự án (⌘S)")
             Toggle(isOn: $model.muted) { Label("Tắt tiếng", systemImage: model.muted ? "speaker.slash" : "speaker.wave.2") }
             Picker("Định dạng", selection: $model.exportPreset) {
                 ForEach(ExportPreset.allCases) { Text($0.rawValue).tag($0) }
@@ -97,7 +117,8 @@ struct PlayerView: NSViewRepresentable {
     func makeNSView(context: Context) -> AVPlayerView {
         let view = AVPlayerView()
         view.player = player
-        view.controlsStyle = .floating
+        // điều khiển phát nằm ở PlaybackBar; preview để trống cho lớp vẽ overlay
+        view.controlsStyle = .none
         return view
     }
 
