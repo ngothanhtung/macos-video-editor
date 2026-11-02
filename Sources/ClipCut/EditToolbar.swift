@@ -6,9 +6,10 @@ import SwiftUI
 struct EditToolbar: View {
     @EnvironmentObject var model: EditorModel
     @State private var showVolume = false
+    @State private var showSpeed = false
     @State private var timelineWidth: Double = 800
 
-    private static let speeds: [Double] = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4]
+    private static let speedPresets: [Double] = [0.5, 1, 1.5, 2, 3]
 
     private var hasClips: Bool { !model.clips.isEmpty }
     private var canEditTarget: Bool { hasClips && model.hasTarget }
@@ -89,24 +90,69 @@ struct EditToolbar: View {
 
     private var speedMenu: some View {
         let enabled = canEditTarget && model.targetClip?.isFreeze == false
-        return Menu {
-            ForEach(Self.speeds, id: \.self) { s in
-                Button {
-                    model.setSpeed(s)
-                } label: {
-                    if model.targetClip?.speed == s { Label("\(s.formatted())x", systemImage: "checkmark") }
-                    else { Text("\(s.formatted())x") }
+        return tool(.symbol("gauge.with.needle"), "Tốc độ", enabled: enabled) { showSpeed.toggle() }
+            .popover(isPresented: $showSpeed, arrowEdge: .bottom) { speedPopover }
+    }
+
+    /// Chỉnh tốc độ theo bước 0.1x: slider, nút −/+, ô nhập số và vài mức có sẵn.
+    private var speedPopover: some View {
+        let clip = model.targetClip
+        let speed = clip?.speed ?? 1
+        let range = EditorModel.speedRange
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Tốc độ").font(.headline)
+                Spacer()
+                TextField("", value: Binding(
+                    get: { speed },
+                    set: { model.setSpeed($0) }
+                ), format: .number.precision(.fractionLength(1)))
+                .textFieldStyle(.roundedBorder)
+                .multilineTextAlignment(.trailing)
+                .frame(width: 56)
+                Text("x")
+            }
+
+            HStack(spacing: 6) {
+                Button { model.setSpeed(speed - 0.1) } label: { Image(systemName: "minus") }
+                    .disabled(speed <= range.lowerBound)
+                Slider(value: Binding(
+                    get: { speed },
+                    set: { model.setSpeed($0, record: false) }
+                ), in: range, step: 0.1) { editing in
+                    if editing { model.checkpoint() }
+                }
+                Button { model.setSpeed(speed + 0.1) } label: { Image(systemName: "plus") }
+                    .disabled(speed >= range.upperBound)
+            }
+            .buttonStyle(.borderless)
+
+            HStack {
+                Text("\(range.lowerBound.formatted())x")
+                Spacer()
+                Text("\(range.upperBound.formatted())x")
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+
+            HStack(spacing: 6) {
+                ForEach(Self.speedPresets, id: \.self) { p in
+                    Button("\(p.formatted())x") { model.setSpeed(p) }
+                        .buttonStyle(.bordered)
+                        .tint(speed == p ? .accentColor : nil)
                 }
             }
-        } label: {
-            ToolIconView(icon: .symbol("gauge.with.needle"))
+            .controlSize(.small)
+
+            if let clip {
+                Text("Thời lượng: \(clip.sourceDuration.timecode) → \(clip.duration.timecode)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .frame(width: 28, height: 26)
-        .disabled(!enabled)
-        .opacity(enabled ? 1 : 0.35)
-        .toolTip("Tốc độ")
+        .padding(14)
+        .frame(width: 280)
     }
 
     private var volumeButton: some View {

@@ -279,10 +279,15 @@ final class EditorModel: ObservableObject {
         clips[i] = c
     }
 
-    func setSpeed(_ speed: Double) {
+    static let speedRange: ClosedRange<Double> = 0.1...10
+
+    /// Đặt tốc độ, làm tròn theo bước 0.1x. `record: false` khi kéo slider (đã checkpoint lúc bắt đầu kéo).
+    func setSpeed(_ speed: Double, record: Bool = true) {
         guard targetClip?.isFreeze == false else { return }
-        updateTarget { $0.speed = speed }
-        status = "Tốc độ \(speed.formatted())x"
+        let s = min(max((speed * 10).rounded() / 10, Self.speedRange.lowerBound), Self.speedRange.upperBound)
+        guard s != targetClip?.speed else { return }
+        updateTarget(record: record) { $0.speed = s }
+        status = "Tốc độ \(s.formatted())x"
     }
 
     func rotateTarget() { updateTarget { $0.quarterTurns = ($0.quarterTurns + 1) % 4 } }
