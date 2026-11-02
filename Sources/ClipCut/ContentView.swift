@@ -10,8 +10,10 @@ struct ContentView: View {
             VStack(spacing: 0) {
                 preview
                 PlaybackBar()
+                    .zIndex(2)
                 Divider()
                 EditToolbar()
+                    .zIndex(1) // tooltip tràn xuống timeline
                 Divider()
                 ClipTimeline()
                     .frame(minHeight: 150, idealHeight: 170, maxHeight: 220)
