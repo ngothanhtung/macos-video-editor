@@ -39,6 +39,8 @@ final class EditorModel: ObservableObject {
     @Published var isEditingText = false
     /// Tăng lên để yêu cầu thanh chú thích focus ô sửa chữ (sau khi tạo / bấm đúp vào chữ).
     @Published var textEditRequest = 0
+    /// Mở hộp thoại tải video YouTube.
+    @Published var showDownloader = false
 
     // Dự án — xem EditorModel+Project.swift
     @Published var projectURL: URL?

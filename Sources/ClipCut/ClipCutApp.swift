@@ -26,6 +26,8 @@ struct ClipCutApp: App {
                 Divider()
                 Button("Nhập video…") { model.promptImport() }
                     .keyboardShortcut("o")
+                Button("Tải video từ YouTube…") { model.showDownloader = true }
+                    .keyboardShortcut("y", modifiers: [.command, .shift])
             }
             CommandGroup(replacing: .saveItem) {
                 Button("Lưu dự án") { model.saveProject() }

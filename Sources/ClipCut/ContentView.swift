@@ -6,6 +6,7 @@ struct ContentView: View {
     @State private var dropTargeted = false
     /// Panel thông tin bên phải, mặc định ẩn; bật bằng nút Info trên thanh công cụ.
     @State private var showInspector = false
+    @StateObject private var downloader = VideoDownloader()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -29,6 +30,10 @@ struct ContentView: View {
                 .inspectorColumnWidth(min: 260, ideal: 280, max: 340)
         }
         .toolbar { toolbarContent }
+        .sheet(isPresented: $model.showDownloader) { DownloadSheet(downloader: downloader) }
+        .onChange(of: downloader.phase) { _, phase in
+            if case .finished(let url) = phase { model.addFiles([url]) }
+        }
         .navigationTitle(model.windowTitle)
         .dropDestination(for: URL.self) { urls, _ in
             model.addFiles(urls.filter { $0.isFileURL })
@@ -44,6 +49,7 @@ struct ContentView: View {
                     Image(systemName: "film.stack").font(.system(size: 44))
                     Text("Kéo thả video vào đây").font(.title3)
                     Button("Nhập video… (⌘O)") { model.promptImport() }
+                    Button("Tải từ YouTube… (⇧⌘Y)") { model.showDownloader = true }
                 }
                 .foregroundStyle(.secondary)
             } else {
@@ -91,6 +97,8 @@ struct ContentView: View {
     private var toolbarContent: some ToolbarContent {
         ToolbarItemGroup {
             Button { model.promptImport() } label: { Label("Nhập", systemImage: "plus") }
+            Button { model.showDownloader = true } label: { Label("Tải từ YouTube", systemImage: "arrow.down.circle") }
+                .help("Tải video từ link YouTube (⇧⌘Y)")
             Button { model.saveProject() } label: { Label("Lưu dự án", systemImage: "square.and.arrow.down") }
                 .help("Lưu dự án (⌘S)")
             Toggle(isOn: $model.muted) { Label("Tắt tiếng", systemImage: model.muted ? "speaker.slash" : "speaker.wave.2") }
